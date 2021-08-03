@@ -44,7 +44,7 @@
 //----------------------------------------------------
 
 #include "ImathVec.h"
-#include <OpenEXR/ImathNamespace.h>
+#include <Imath/ImathNamespace.h>
 // #include "half.h"
 
 #ifndef IMATH_HOSTDEVICE

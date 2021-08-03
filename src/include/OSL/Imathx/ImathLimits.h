@@ -43,7 +43,7 @@
 //
 //----------------------------------------------------------------
 
-#include <OpenEXR/ImathNamespace.h>
+#include <Imath/ImathNamespace.h>
 #include <float.h>
 #include <limits.h>
 
