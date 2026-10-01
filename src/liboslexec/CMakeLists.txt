@@ -651,6 +651,16 @@ endforeach(batched_target_lib)
 
 install_targets (${local_lib})
 
+# The runtime BackendMetal's output includes, for renderers to compile it
+# with. A renderer adds include/OSL/metal to its msl include paths.
+install (FILES osl_metal_runtime.h
+         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/OSL/metal
+         COMPONENT developer)
+install (DIRECTORY osl_metal/
+         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/OSL/metal/osl_metal
+         COMPONENT developer
+         FILES_MATCHING PATTERN "*.h")
+
 # Unit tests
 if (OSL_BUILD_TESTS AND BUILD_TESTING)
     add_executable (accum_test accum_test.cpp)
