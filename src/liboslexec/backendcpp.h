@@ -20,7 +20,7 @@ namespace pvt {  // OSL::pvt
 /// OSOProcessor that generates C++ equivalent to the shader network,
 /// with main entry function call signature identical to what the JIT
 /// produces, so it is exactly substitutable for the JIT results.
-class BackendCpp final : public OSOProcessorBase {
+class BackendCpp : public OSOProcessorBase {
 public:
     BackendCpp(ShadingSystemImpl& shadingsys, ShaderGroup& group,
                ShadingContext* context);
@@ -100,7 +100,30 @@ public:
     // Return the in-language representation of a quoted string literal. For
     // example, in C++ meant for OSL JIT, this might be
     // `OSL::ustring("blah").hash()`.
-    std::string cpp_string_literal_rep(string_view s) const;
+    virtual std::string cpp_string_literal_rep(string_view s) const;
+
+    // Declaration of a named string constant, ahead of its name. The hash
+    // is computed once, so C++ makes it a function-local static.
+    virtual std::string lang_string_const_decl() const;
+
+    // Whether the target language has goto. Without it, a for loop's
+    // `continue`, a `return` from an inlined function, and a shader-scope
+    // `return` or `exit` become structured jumps instead (see jump_to()).
+    virtual bool lang_has_goto() const { return true; }
+
+    // Structured jumps, for languages without goto. Each C++ construct a
+    // `break` can leave is a jump scope. A jump to the innermost scope is a
+    // plain `break`; a jump further out sets the target scope's flag and
+    // breaks, and each scope it crosses breaks again after it closes, until
+    // the target is left.
+    enum class JumpScope { Loop, Continue, Function, Layer };
+    void open_jump_scope(JumpScope kind);
+    void close_jump_scope();
+    void jump_to(JumpScope kind);
+    bool innermost_jump_scope_is(JumpScope kind) const
+    {
+        return !m_jump_scopes.empty() && m_jump_scopes.back().kind == kind;
+    }
 
     // debug_uninit helpers
     void cpp_uninit_marker_init(const Symbol& s);
@@ -115,6 +138,14 @@ public:
     // Used to decide whether a functioncall body needs a goto-label so 'return'
     // jumps to the end of the inlined body instead of out of the layer function.
     bool body_has_return(int opbegin, int opend);
+
+    struct jump_scope_t {
+        JumpScope kind;
+        std::string flag;         // set by jumps from further in
+        std::vector<int> crossed;  // outer scopes jumped to from in here
+    };
+    std::vector<jump_scope_t> m_jump_scopes;
+    int m_jump_flag_counter = 0;
 
     // Loop context stack. Each entry is the goto-target for 'continue' in the
     // innermost loop. An empty string means emit the natural 'continue;' keyword.

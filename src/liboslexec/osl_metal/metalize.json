@@ -1,0 +1,411 @@
+{
+    "comment": "Sources metalize.py translates into the metal runtime. $IMATH_INCLUDE and $OIIO_INCLUDE are the include folders of the imath and oiio osl is built against.",
+    "define": [
+        "IMATH_FOREIGN_VECTOR_INTEROP=0",
+        "OIIO_CPLUSPLUS_VERSION=17",
+        "OIIO_FMATH_SIMD_FRIENDLY=0",
+        "OIIO_INTEL_LLVM_COMPILER=0",
+        "OIIO_MSVS_BEFORE_2022=0",
+        "OIIO_SIMD=0",
+        "OIIO_SIMD_AVX=0",
+        "OIIO_SIMD_NEON=0",
+        "OIIO_SIMD_SSE=0",
+        "OSL_ANY_CLANG=1",
+        "OSL_CPLUSPLUS_VERSION=17",
+        "OSL_FAST_MATH=1",
+        "OSL_INTEL_CLASSIC_COMPILER_VERSION=0",
+        "OSL_INTEL_LLVM_COMPILER_VERSION=0"
+    ],
+    "undefine": [
+        "IMATH_HALF_NO_LOOKUP_TABLE",
+        "OIIO_ANY_CLANG",
+        "OSL_COMPILING_TO_BITCODE",
+        "_MSC_VER",
+        "_WIN32",
+        "__CUDACC__",
+        "__CUDA_ARCH__",
+        "__FreeBSD__",
+        "__OSL_WIDE_PVT"
+    ],
+    "drop": [
+        "<double>",
+        "\\b(succd|predd|finited)\\b",
+        "\\bOIIO::simd\\b",
+        "\\bhalf\\b",
+        "\\bsimd::",
+        "\\bstd::(ostream|istream|ios_base|setw|invalid_argument|domain_error)\\b",
+        "\\bthrow\\b",
+        "\\bv(float|int|bool)(4|8|16)\\b"
+    ],
+    "types": [
+        "ClosureAdd",
+        "ClosureColor",
+        "ClosureComponent",
+        "ClosureMul",
+        "Color3",
+        "ColorSystem",
+        "Dual2",
+        "ExecContext",
+        "ExecContextPtr",
+        "Float",
+        "Matrix33",
+        "Matrix44",
+        "NoiseParams",
+        "OpaqueExecContextPtr",
+        "ShaderGlobals",
+        "ShadingContext",
+        "Shear6",
+        "TransformationPtr",
+        "TypeDesc",
+        "Vec2",
+        "Vec3",
+        "ustring",
+        "ustringhash"
+    ],
+    "not_types": [],
+    "units": [
+        {
+            "source": "$IMATH_INCLUDE/Imath/ImathMath.h",
+            "output": "imath_math.h"
+        },
+        {
+            "source": "$IMATH_INCLUDE/Imath/ImathFun.h",
+            "output": "imath_fun.h"
+        },
+        {
+            "source": "$IMATH_INCLUDE/Imath/ImathVec.h",
+            "output": "imath_vec.h"
+        },
+        {
+            "source": "$IMATH_INCLUDE/Imath/ImathColor.h",
+            "output": "imath_color.h",
+            "drop": [
+                "\\bColor3\\b(?!FromScalar)",
+                "\\bC3[cfhi]\\b"
+            ],
+            "suffix": "\nIMATH_INTERNAL_NAMESPACE_HEADER_ENTER\n// msl has no derived classes, and Color3 derives from Vec3 without adding\n// members, so it's the same type here.\ntemplate <class T> using Color3 = Vec3<T>;\ntypedef Color3<float> C3f;\ntypedef Color3<int> C3i;\nIMATH_INTERNAL_NAMESPACE_HEADER_EXIT\n"
+        },
+        {
+            "source": "$IMATH_INCLUDE/Imath/ImathMatrix.h",
+            "output": "imath_matrix.h",
+            "prefix": "IMATH_INTERNAL_NAMESPACE_HEADER_ENTER\n// Only named by members that set or extract shear, which nothing calls.\ntemplate <class T> class Shear6;\nIMATH_INTERNAL_NAMESPACE_HEADER_EXIT\n\n"
+        },
+        {
+            "source": "$OIIO_INCLUDE/OpenImageIO/fmath.h",
+            "output": "oiio_fmath.h",
+            "lines": [
+                1355,
+                2199
+            ],
+            "prefix": "namespace OIIO {\n",
+            "suffix": "\n}  // namespace OIIO\n"
+        },
+        {
+            "source": "$OIIO_INCLUDE/OpenImageIO/fmath.h",
+            "output": "oiio_fmath_numerics.h",
+            "lines": [
+                2200,
+                2292
+            ],
+            "prefix": "namespace OIIO {\n",
+            "suffix": "\n}  // namespace OIIO\n",
+            "drop": [
+                "\\bspan_strided\\b|\\bspan\\b"
+            ]
+        },
+        {
+            "source": "include/OSL/oslconfig.h.in",
+            "output": "osl_config.h",
+            "lines": [
+                258,
+                301
+            ],
+            "prefix": "OSL_NAMESPACE_BEGIN\n",
+            "suffix": "\nOSL_NAMESPACE_END\n"
+        },
+        {
+            "source": "include/OSL/shaderglobals.h",
+            "output": "osl_shaderglobals.h",
+            "lines": [
+                171,
+                465
+            ],
+            "prefix": "OSL_NAMESPACE_BEGIN\n",
+            "suffix": "\nOSL_NAMESPACE_END\n"
+        },
+        {
+            "source": "include/OSL/Imathx/Imathx.h",
+            "output": "osl_imathx.h"
+        },
+        {
+            "source": "include/OSL/dual.h",
+            "output": "osl_dual.h",
+            "pre": [
+                {
+                    "old": "    OSL_HOSTDEVICE constexpr Dual (std::initializer_list<T> vals) {\n#if OIIO_CPLUSPLUS_VERSION >= 14\n        static_assert (vals.size() == elements, \"Wrong number of initializers\");\n#endif\n        OSL_INDEX_LOOP(i, elements, {\n            elem(i) = vals.begin()[i];\n        });\n    }\n",
+                    "new": ""
+                },
+                {
+                    "old": "    friend std::ostream& operator<< (std::ostream &out, const Dual &x) {\n        out << x.val() << \"[\";\n        OSL_INDEX_LOOP(i, PARTIALS, {\n            out << (x.partial(i)) << ((i < PARTIALS-1) ? ',' : ']');\n        });\n        return out;\n    }\n",
+                    "new": ""
+                },
+                {
+                    "old": "class Dual : public DualStorage<T, PARTIALS> {",
+                    "new": "class Dual {\n    // msl has no derived classes, so the storage is a member. It's the\n    // only one, so the layout is unchanged.\npublic:\n    DualStorage<T, PARTIALS> m_storage;"
+                },
+                {
+                    "old": "    using DualStorage<T, PARTIALS>::elem;",
+                    "new": "    template<int N>\n    OSL_HOSTDEVICE constexpr const T& elem (ConstIndex<N> i) const { return m_storage.elem(i); }\n    template<int N>\n    OSL_HOSTDEVICE T& elem (ConstIndex<N> i) { return m_storage.elem(i); }"
+                },
+                {
+                    "old": "    : DualStorage<T, PARTIALS>()\n",
+                    "new": "    : m_storage()\n",
+                    "count": 3
+                },
+                {
+                    "old": "    : DualStorage<T, PARTIALS>(x)\n",
+                    "new": "    : m_storage(x.m_storage)\n"
+                },
+                {
+                    "old": "    : DualStorage<T, PARTIALS>{ x, static_cast<T>(derivs)...}",
+                    "new": "    : m_storage{ x, static_cast<T>(derivs)...}"
+                },
+                {
+                    "old": "    static const int elements = PARTIALS+1;   // main value + partials",
+                    "new": "    // msl would need a static data member in the constant address space.\n    enum : int { elements = PARTIALS+1 };   // main value + partials"
+                },
+                {
+                    "old": "template<class T> struct is_Dual : std::false_type {};",
+                    "new": "template<class T> struct is_Dual { enum : bool { value = false }; };"
+                },
+                {
+                    "old": "template<class T, int P> struct is_Dual<Dual<T,P>> : std::true_type {};",
+                    "new": "template<class T, int P> struct is_Dual<Dual<T,P>> { enum : bool { value = true }; };"
+                }
+            ]
+        },
+        {
+            "source": "include/OSL/dual_vec.h",
+            "output": "osl_dual_vec.h",
+            "drop": [
+                "\\bcomp_[xyz]\\s*\\(const\\s+(Dual<)?Color3\\b",
+                "operator\\*\\s*\\(const\\s+Dual<Color3"
+            ]
+        },
+        {
+            "source": "liboslexec/llvm_ops.cpp",
+            "output": "osl_ops.h",
+            "lines": [
+                84,
+                1009
+            ]
+        },
+        {
+            "source": "liboslexec/osl_cpp_runtime.h",
+            "output": "osl_cpp_inline.h",
+            "lines": [
+                634,
+                1071
+            ],
+            "drop": [
+                "\\bosl_strto[if]_"
+            ]
+        },
+        {
+            "source": "liboslexec/opmatrix.cpp",
+            "output": "osl_opmatrix.h",
+            "lines": [
+                26,
+                348
+            ],
+            "define": [
+                "__CUDACC__"
+            ],
+            "pre": [
+                {
+                    "old": "#    define OSL_SHADEOP_EXPORT extern \"C\" OSL_DLL_EXPORT",
+                    "new": "// Implemented by the renderer's msl, as it would be for cuda.\n#    define OSL_SHADEOP_EXPORT"
+                }
+            ],
+            "suffix": "\nusing namespace OSL::pvt;\n"
+        },
+        {
+            "source": "include/OSL/sfmath.h",
+            "output": "osl_sfmath.h"
+        },
+        {
+            "source": "include/OSL/oslnoise.h",
+            "output": "osl_oslnoise.h",
+            "drop": [
+                "\\bsfm::",
+                "\\bstruct\\s+U?SimplexNoiseScalar\\b"
+            ],
+            "rename": {
+                "\\bstruct\\s+(\\w+)\\s*:\\s*(?:public\\s+)?([\\w:]+<[^{};]*>)\\s*\\{\\s*\\}\\s*;": "using \\1 = \\2;"
+            },
+            "pre": [
+                {
+                    "old": "    constexpr float convertFactor = static_cast<float>(static_cast<double>(1.0) / static_cast<double>(std::numeric_limits<unsigned int>::max()));",
+                    "new": "    // msl has no double; this is the same float, 1 / (2^32 - 1).\n    constexpr float convertFactor = 2.3283064370807974e-10f;"
+                },
+                {
+                    "old": "struct CellNoise: public IntHashNoiseBase<CellNoise>  {\n    OSL_FORCEINLINE OSL_HOSTDEVICE CellNoise () { }\n\n    static OSL_FORCEINLINE OSL_HOSTDEVICE unsigned int\n    transformToUint(float val)\n    {\n        return OIIO::ifloor(val);\n    }\n};",
+                    "new": "// msl has no derived classes, so what CellNoise added to its base is a policy\n// the base takes instead.\nstruct CellNoiseTransform {\n    static OSL_FORCEINLINE OSL_HOSTDEVICE unsigned int\n    transformToUint(float val)\n    {\n        return OIIO::ifloor(val);\n    }\n};\nusing CellNoise = IntHashNoiseBase<CellNoiseTransform>;"
+                },
+                {
+                    "old": "struct HashNoise: public IntHashNoiseBase<HashNoise>  {\n    OSL_FORCEINLINE OSL_HOSTDEVICE HashNoise () { }\n\n    static OSL_FORCEINLINE OSL_HOSTDEVICE unsigned int\n    transformToUint(float val)\n    {\n        return bitcast_to_uint(val);\n    }\n};",
+                    "new": "// msl has no derived classes, so what HashNoise added to its base is a policy\n// the base takes instead.\nstruct HashNoiseTransform {\n    static OSL_FORCEINLINE OSL_HOSTDEVICE unsigned int\n    transformToUint(float val)\n    {\n        return bitcast_to_uint(val);\n    }\n};\nusing HashNoise = IntHashNoiseBase<HashNoiseTransform>;"
+                },
+                {
+                    "old": "struct NoiseParams;\n\nnamespace pvt {",
+                    "new": "namespace pvt {"
+                }
+            ]
+        },
+        {
+            "source": "liboslnoise/simplexnoise.cpp",
+            "output": "osl_simplexnoise.h",
+            "lines": [
+                53,
+                748
+            ],
+            "rename": {
+                "\\bstruct\\s+(\\w+)\\s*:\\s*(?:public\\s+)?([\\w:]+<[^{};]*>)\\s*\\{\\s*\\}\\s*;": "using \\1 = \\2;",
+                "\\bconst\\s+float\\s+thread\\*": "constant float*"
+            }
+        },
+        {
+            "source": "liboslnoise/gabornoise.h",
+            "output": "osl_gabornoise_h.h",
+            "rename": {
+                "\\bstruct\\s+(\\w+)\\s*:\\s*(?:public\\s+)?([\\w:]+<[^{};]*>)\\s*\\{\\s*\\}\\s*;": "using \\1 = \\2;",
+                "\\bstatic\\s+OSL_DEVICE\\s+(?:constexpr|const)\\s+float\\b": "constant constexpr float"
+            }
+        },
+        {
+            "source": "liboslnoise/gabornoise.cpp",
+            "output": "osl_gabornoise.h",
+            "rename": {
+                "\\bstruct\\s+(\\w+)\\s*:\\s*(?:public\\s+)?([\\w:]+<[^{};]*>)\\s*\\{\\s*\\}\\s*;": "using \\1 = \\2;",
+                "\\bstatic constexpr float\\b": "constexpr float"
+            }
+        },
+        {
+            "source": "liboslexec/opnoise.cpp",
+            "output": "osl_opnoise.h",
+            "lines": [
+                16,
+                983
+            ],
+            "rename": {
+                "\\bstruct\\s+(\\w+)\\s*:\\s*(?:public\\s+)?([\\w:]+<[^{};]*>)\\s*\\{\\s*\\}\\s*;": "using \\1 = \\2;",
+                "\\bchar\\s+thread\\*": "void thread*"
+            },
+            "pre": [
+                {
+                    "old": "    new (opt) NoiseParams;",
+                    "new": "    *(NoiseParams*)opt = NoiseParams();"
+                },
+                {
+                    "old": "    ShaderGlobals* sg = (ShaderGlobals*)sg_;\n    sg->context->shadingsys().count_noise();",
+                    "new": "    // No shading system statistics on the gpu.\n    (void)sg_;"
+                }
+            ]
+        },
+        {
+            "source": "liboslexec/opcolor.h",
+            "output": "osl_opcolor_h.h",
+            "define": [
+                "__CUDACC__"
+            ],
+            "pre": [
+                {
+                    "old": "private:\n    template<typename Color>\n    OSL_HOSTDEVICE inline Color\n    transformc(",
+                    "new": "public:  // so osl_metal/color.h can fill one in\n    template<typename Color>\n    OSL_HOSTDEVICE inline Color\n    transformc("
+                },
+                {
+                    "old": "    Color3 m_blackbody_table[317];  ///< Precomputed blackbody table",
+                    "new": "    // On metal the table stays where the renderer uploaded it, which is\n    // too big to copy per thread; see osl_metal/color.h.\n    constant Color3* m_blackbody_table;"
+                }
+            ],
+            "rename": {
+                "\\bconst\\s+Chroma\\s+thread\\*": "constant Chroma*"
+            }
+        },
+        {
+            "source": "liboslexec/opcolor_impl.h",
+            "output": "osl_opcolor_impl.h",
+            "define": [
+                "__CUDACC__"
+            ],
+            "rename": {
+                "\\bm_blackbody_table\\[([^\\]]+)\\]": "copy_constant(m_blackbody_table[\\1])"
+            }
+        },
+        {
+            "source": "liboslexec/opcolor.cpp",
+            "output": "osl_opcolor.h",
+            "lines": [
+                26,
+                522
+            ],
+            "define": [
+                "__CUDACC__",
+                "OSL_COMPILING_TO_BITCODE"
+            ],
+            "drop": [
+                "\\bColorSystem::set_colorspace\\b"
+            ],
+            "pre": [
+                {
+                    "old": "extern \"C\" __device__ int\nrend_get_userdata(ustringhash name, void* data, int data_size,\n                  const OSL::TypeDesc& type, int index);\n\nnamespace {\n\n__device__ static inline const ColorSystem&\nget_colorsystem(OSL::OpaqueExecContextPtr /*oec*/)\n{\n    void* ptr;\n    rend_get_userdata(Hashes::colorsystem, &ptr, 8, OSL::TypeDesc::PTR, 0);\n    return *((ColorSystem*)ptr);\n}\n\n}  // namespace",
+                    "new": "// On metal, the color system is the one the renderer uploaded from\n// ShadingSystem::getattribute(\"colorsystem\"); see osl_metal/color.h.\nColorSystem get_colorsystem(OSL::OpaqueExecContextPtr oec);"
+                }
+            ],
+            "rename": {
+                "\\bconst\\s+(ColorSystem::)?Chroma\\s+thread\\*": "constant \\1Chroma*"
+            }
+        },
+        {
+            "source": "liboslexec/splineimpl.h",
+            "output": "osl_splineimpl.h",
+            "pre": [
+                {
+                    "old": "    const SplineBasis& spline;",
+                    "new": "    // The bases are a table in the constant address space.\n    constant SplineBasis& spline;"
+                },
+                {
+                    "old": "    const bool constant;",
+                    "new": "    const bool constant_;  // constant is a keyword in msl"
+                },
+                {
+                    "old": "        if (constant) {",
+                    "new": "        if (constant_) {"
+                }
+            ]
+        },
+        {
+            "source": "liboslexec/opspline.cpp",
+            "output": "osl_opspline.h",
+            "lines": [
+                28,
+                158
+            ],
+            "suffix": "\nusing namespace OSL::pvt;\n"
+        },
+        {
+            "source": "liboslexec/opclosure.cpp",
+            "output": "osl_opclosure.h",
+            "lines": [
+                15,
+                116
+            ],
+            "suffix": "\n}  // namespace pvt\nOSL_NAMESPACE_END\nusing namespace OSL::pvt;\n",
+            "prefix": "OSL_NAMESPACE_BEGIN\nnamespace pvt {\n"
+        }
+    ],
+    "rename": {
+        "\\bHashes::(constant|device|thread|threadgroup|kernel|vertex|fragment|sampler)\\b": "Hashes::\\1_",
+        "\\bstatic\\s+constexpr\\s+bool\\s+(\\w+)\\s*=\\s*(true|false)\\s*;": "enum : bool { \\1 = \\2 };"
+    }
+}

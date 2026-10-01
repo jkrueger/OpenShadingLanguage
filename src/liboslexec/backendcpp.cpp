@@ -3,6 +3,7 @@
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
 
+#include <algorithm>
 #include <mutex>
 
 #include <OpenImageIO/filesystem.h>
@@ -428,9 +429,8 @@ BackendCpp::cpp_const_literal_str(const Symbol& sym)
     auto one = [&](int base) -> std::string {
         if (td.basetype == TypeDesc::STRING
             || td.basetype == TypeDesc::USTRINGHASH)
-            // OSL::ustringhash has an implicit ctor from OSL::ustring.
-            return fmtformat("OSL::ustring(\"{}\")",
-                             quoted_string(sym.get_string(base)));
+            return fmtformat("OSL::ustringhash::from_hash({})",
+                             cpp_string_literal_rep(sym.get_string(base)));
         if (nagg == 1)
             return (td.basetype == TypeDesc::FLOAT)
                        ? float_lit(sym.get_float(base))
@@ -522,6 +522,53 @@ BackendCpp::body_has_continue(int opbegin, int opend)
 // Scan [opbegin, opend) for a 'return' op that belongs to THIS inlined function
 // (not nested inside an inner functioncall). 'return' ops inside loops/ifs of
 // this function DO belong to it, so only nested function bodies are skipped.
+void
+BackendCpp::open_jump_scope(JumpScope kind)
+{
+    // The flag lives in the enclosing block, so it's still in scope where
+    // the checks after the construct read it.
+    std::string flag = fmtformat("cpp_jump_{}", m_jump_flag_counter++);
+    outputfmtln("bool {} = false;", flag);
+    m_jump_scopes.push_back({ kind, flag, {} });
+}
+
+
+
+void
+BackendCpp::close_jump_scope()
+{
+    // Call right after the construct's closing brace. Anything that jumped
+    // past this scope from inside it is still on its way out.
+    jump_scope_t scope = m_jump_scopes.back();
+    m_jump_scopes.pop_back();
+    for (int target : scope.crossed)
+        outputfmtln("if ({}) break;", m_jump_scopes[target].flag);
+}
+
+
+
+void
+BackendCpp::jump_to(JumpScope kind)
+{
+    int target = int(m_jump_scopes.size()) - 1;
+    while (target >= 0 && m_jump_scopes[target].kind != kind)
+        --target;
+    OSL_ASSERT(target >= 0 && "jump with no enclosing scope to leave");
+    int innermost = int(m_jump_scopes.size()) - 1;
+    if (target == innermost) {
+        outputfmtln("break;");
+        return;
+    }
+    outputfmtln("{{ {} = true; break; }}", m_jump_scopes[target].flag);
+    for (int s = target + 1; s <= innermost; ++s) {
+        auto& crossed = m_jump_scopes[s].crossed;
+        if (std::find(crossed.begin(), crossed.end(), target) == crossed.end())
+            crossed.push_back(target);
+    }
+}
+
+
+
 bool
 BackendCpp::body_has_return(int opbegin, int opend)
 {
@@ -683,7 +730,8 @@ BackendCpp::generate_layer_func(int layer)
                               && (td.basetype == TypeDesc::STRING
                                   || td.basetype == TypeDesc::USTRINGHASH));
             if (is_string) {
-                outputfmtln("static const uint64_t {} = {};", s.cpp_safe_name(),
+                outputfmtln("{} {} = {};", lang_string_const_decl(),
+                            s.cpp_safe_name(),
                             cpp_string_literal_rep(s.get_string()));
             } else if (td.arraylen > 0) {
                 outputfmtln("{} = {};", cpp_var_declaration(s),
@@ -759,9 +807,9 @@ BackendCpp::generate_layer_func(int layer)
                                             : fmtformat("(void*)&{}", nm);
             outputfmtln(
                 "int {}__got = osl_bind_interpolated_param((void*)sg, "
-                "OSL::ustring(\"{}\").hash(), {}LL, {}, (void*)gd->userdata{}_{}_, "
+                "{}, {}LL, {}, (void*)gd->userdata{}_{}_, "
                 "{}, {}, {}, (char*)&gd->userdata_init_flags[{}], {});",
-                nm, s.name(), tdp, (int)group().m_userdata_derivs[ui], ui,
+                nm, cpp_string_literal_rep(s.name()), tdp, (int)group().m_userdata_derivs[ui], ui,
                 group().m_userdata_names[ui], (int)s.has_derivs(), sym,
                 s.derivsize(), ui, ui);
             outputfmtln("if (!{}__got) {{", nm);
@@ -777,20 +825,31 @@ BackendCpp::generate_layer_func(int layer)
         }
     }
 
-    // Emit shader ops (main body only; params' init ops ran above).
-    build_cpp_code(inst()->maincodebegin(), int(inst()->ops().size()), false);
-
     // Landing label for a shader-scope return/exit: it precedes the write-back
     // passes below so an early return still publishes the outputs computed so
     // far. Only emitted when a top-level return/exit exists (else the label
     // would be unused). `exit` ops always branch here; `return` ops outside any
     // inlined function do too (body_has_return ignores returns nested in
-    // functioncalls).
+    // functioncalls). Without goto, the main code is a block the exit leaves.
     bool has_shader_exit = body_has_return(0, int(inst()->ops().size()));
     for (auto& o : inst()->ops())
         if (o.opname() == "exit")
             has_shader_exit = true;
-    if (has_shader_exit)
+    bool exit_block = has_shader_exit && !lang_has_goto();
+    if (exit_block) {
+        open_jump_scope(JumpScope::Layer);
+        outputfmtln("do {{");
+        increment_indent();
+    }
+
+    // Emit shader ops (main body only; params' init ops ran above).
+    build_cpp_code(inst()->maincodebegin(), int(inst()->ops().size()), false);
+
+    if (exit_block) {
+        decrement_indent();
+        outputfmtln("}} while (false);");
+        m_jump_scopes.pop_back();
+    } else if (has_shader_exit)
         outputfmtln("cpp_layer_exit:;");
 
     // Write modified globals back to the ShaderGlobals struct. The JIT operates
@@ -1182,8 +1241,8 @@ BackendCpp::cpp_uninit_marker_init(const Symbol& s)
             nm, ncomp);
     } else if (t.basetype == TypeDesc::STRING
                || t.basetype == TypeDesc::USTRINGHASH) {
-        std::string mk
-            = "OSL::ustringhash::from_hash(OSL::ustring(\"!!!uninitialized!!!\").hash())";
+        std::string mk = "OSL::ustringhash::from_hash("
+                         + cpp_string_literal_rep("!!!uninitialized!!!") + ")";
         if (t.arraylen > 0)
             outputfmtln("for (int ___k=0;___k<{};++___k) {}[___k] = {};", n, nm,
                         mk);
@@ -1338,7 +1397,21 @@ cpp_gen_functioncall(BackendCpp& rop, int opnum)
     // out of the whole layer function. If the body contains a return, emit a
     // goto-label after it and push it as the function's return target.
     std::string ret_lbl;
-    if (rop.body_has_return(body_begin, body_end))
+    bool has_return = rop.body_has_return(body_begin, body_end);
+    if (has_return && !rop.lang_has_goto()) {
+        // Without goto, the body is a block the return leaves.
+        rop.push_func_context("return");
+        rop.open_jump_scope(BackendCpp::JumpScope::Function);
+        rop.outputfmtln("do {{");
+        rop.increment_indent();
+        rop.build_cpp_code(body_begin, body_end, false);
+        rop.decrement_indent();
+        rop.outputfmtln("}} while (false);");
+        rop.close_jump_scope();
+        rop.pop_func_context();
+        return true;
+    }
+    if (has_return)
         ret_lbl = fmtformat("cpp_func_return_{}", rop.new_loop_label_id());
     rop.push_func_context(ret_lbl);
 
@@ -1619,11 +1692,14 @@ cpp_gen_noise(BackendCpp& rop, int opnum)
     bool need_temp  = derivs && !Result.has_derivs();
     std::string resvar;
     if (need_temp) {
+        // Zeroed, because a generic noise with an unknown name reports it
+        // and leaves the result unwritten, which the JIT reads as 0.
         resvar = fmtformat("_noiseres{}", opnum);
-        rop.outputfmtln("{} {};",
+        rop.outputfmtln("{} {} = {}(0.0f);",
                         outdim == 3 ? "OSL::Dual2<OSL::Vec3>"
                                     : "OSL::Dual2<float>",
-                        resvar);
+                        resvar,
+                        outdim == 3 ? "OSL::Vec3" : "float");
     } else {
         resvar = Result.cpp_safe_name();
     }
@@ -2001,9 +2077,9 @@ cpp_gen_construct_triple(BackendCpp& rop, int opnum)
                          ? "osl_transform_triple_nonlinear"
                          : "osl_transform_triple";
     rop.outputfmtln("{}((void*)sg, (void*)&{}, {}, (void*)&{}, {}, {}, "
-                    "OSL::ustring(\"common\").hash(), {});",
+                    "{}, {});",
                     fn, rn, pderiv, rn, pderiv, rop.cpp_spacename_pod(Space),
-                    vectype);
+                    rop.cpp_string_literal_rep("common"), vectype);
     return true;
 }
 
@@ -2148,7 +2224,7 @@ cpp_gen_transform(BackendCpp& rop, int opnum)
                          : "osl_transform_triple";
     std::string from_pod = From
                                ? rop.cpp_spacename_pod(*From)
-                               : std::string("OSL::ustring(\"common\").hash()");
+                               : rop.cpp_string_literal_rep("common");
     // Pass the real deriv flags so the runtime reads/writes the Dual2<Vec3>
     // storage (and zeroes output derivs when the input carries none).
     rop.outputfmtln("{}((void*)sg, (void*)&{}, {}, (void*)&{}, {}, {}, {}, {});",
@@ -2191,9 +2267,15 @@ cpp_gen_luminance(BackendCpp& rop, int opnum)
     Opcode& op(rop.inst()->ops()[opnum]);
     Symbol& Result(*rop.opargsym(op, 0));
     Symbol& C(*rop.opargsym(op, 1));
-    // Triples carry no derivatives in the C++ backend, so always the _fv form.
-    rop.outputfmtln("osl_luminance_fv((void*)sg, (void*)&{}, (void*)&{});",
+    // As in llvm_gen_luminance: the derivative form when both sides carry
+    // derivatives, and zeroed partials when only the result does.
+    bool deriv = rop.sym_carries_derivs(C) && rop.sym_carries_derivs(Result);
+    rop.outputfmtln("{}((void*)sg, (void*)&{}, (void*)&{});",
+                    deriv ? "osl_luminance_dfdv" : "osl_luminance_fv",
                     Result.cpp_safe_name(), rop.cpp_value_str(C));
+    if (!deriv && rop.sym_carries_derivs(Result))
+        rop.outputfmtln("{} = {}({}.val());", Result.cpp_safe_name(),
+                        rop.lang_sym_type_name(Result), Result.cpp_safe_name());
     return true;
 }
 
@@ -2959,7 +3041,7 @@ cpp_gen_getattribute(BackendCpp& rop, int opnum)
     TypeDesc dest_type  = Destination.typespec().simpletype();
     long long tdpacked  = OSL::bitcast<long long, TypeDesc>(dest_type);
     std::string objname = object_lookup ? rop.cpp_spacename_pod(ObjectName)
-                                        : std::string("OSL::ustring().hash()");
+                                        : rop.cpp_string_literal_rep("");
     std::string idx     = array_lookup ? rop.cpp_value_str(Index)
                                        : std::string("0");
     rop.outputfmtln(
@@ -3047,7 +3129,7 @@ cpp_gen_getmessage(BackendCpp& rop, int opnum)
         return true;
     }
     std::string source = has_source ? rop.cpp_spacename_pod(Source)
-                                    : std::string("OSL::ustring().hash()");
+                                    : rop.cpp_string_literal_rep("");
     rop.outputfmtln(
         "{} = osl_getmessage((OSL::ShaderGlobals*)sg, {}, {}, {}LL, (void*)&{}, {}, {}, {}ULL, {});",
         Result.cpp_safe_name(), source, rop.cpp_spacename_pod(Name),
@@ -3189,7 +3271,7 @@ cpp_gen_split(BackendCpp& rop, int opnum)
     int arraylen         = Results.typespec().arraylength();
     std::string sep      = (op.nargs() >= 4)
                                ? rop.cpp_spacename_pod(*rop.opargsym(op, 3))
-                               : std::string("OSL::ustring(\"\").hash()");
+                               : rop.cpp_string_literal_rep("");
     std::string maxsplit = (op.nargs() >= 5)
                                ? rop.cpp_value_str(*rop.opargsym(op, 4))
                                : fmtformat("{}", arraylen);
@@ -4007,7 +4089,11 @@ cpp_gen_binary_op(BackendCpp& rop, int opnum)
     // scalar, so broadcast the scalar to triple via 3-arg constructor first.
     if (scalar_promote
         && A.typespec().is_triple() != B.typespec().is_triple()) {
-        std::string tn = rop.lang_sym_type_name(R);
+        // The broadcast is a plain triple even when R carries derivs: the
+        // scalar is stripped to its value, and dual.h adds a triple to a
+        // Dual2 triple. Naming R's own type would construct a Dual2<Vec3>
+        // from three floats, as value, dx and dy.
+        std::string tn = rop.lang_type_name(R.typespec().simpletype());
         if (A.typespec().is_triple()) {
             std::string bv = scalar_str(B, /*force_strip=*/true);
             rop.outputfmtln("{} = {} {} {}({}, {}, {});", R.cpp_safe_name(),
@@ -4119,6 +4205,73 @@ cpp_gen_div(BackendCpp& rop, int opnum)
 // re-evaluates the condition); for 'for'/'dowhile' loops whose body contains a
 // 'continue' op we emit a single step-label and a goto so the step/cond ops
 // still run before the next iteration.
+// Loops for languages without goto. A loop whose `continue` has to run the
+// step ops first puts its body in a block of its own, which `continue`
+// leaves, rather than jumping to a label before the step.
+static bool
+cpp_gen_loop_op_structured(BackendCpp& rop, int opnum, bool continue_block)
+{
+    using JumpScope = BackendCpp::JumpScope;
+    Opcode& op(rop.inst()->ops()[opnum]);
+    Symbol& cond   = *rop.opargsym(op, 0);
+    ustring opname = op.opname();
+
+    auto body = [&]() {
+        if (!continue_block) {
+            rop.build_cpp_code(op.jump(1), op.jump(2), false);
+            return;
+        }
+        rop.open_jump_scope(JumpScope::Continue);
+        rop.outputfmtln("do {{");
+        rop.increment_indent();
+        rop.build_cpp_code(op.jump(1), op.jump(2), false);
+        rop.decrement_indent();
+        rop.outputfmtln("}} while (false);");
+        rop.close_jump_scope();
+    };
+
+    // The loop context only says whether `continue` is the keyword ("")
+    // or leaves the body block ("block").
+    rop.push_loop_context(continue_block ? "block" : "");
+    if (opname == Strings::op_for) {
+        rop.build_cpp_code(opnum + 1, op.jump(0), false);
+        rop.open_jump_scope(JumpScope::Loop);
+        rop.outputfmtln("while (true) {{");
+        rop.increment_indent();
+        rop.build_cpp_code(op.jump(0), op.jump(1), false);
+        rop.outputfmtln("if (!{}) break;", cond.cpp_safe_name());
+        body();
+        rop.build_cpp_code(op.jump(2), op.jump(3), false);
+        rop.decrement_indent();
+        rop.outputfmtln("}}");
+        rop.close_jump_scope();
+    } else if (opname == Strings::op_while) {
+        rop.open_jump_scope(JumpScope::Loop);
+        rop.outputfmtln("while (true) {{");
+        rop.increment_indent();
+        rop.build_cpp_code(op.jump(0), op.jump(1), false);
+        rop.outputfmtln("if (!{}) break;", cond.cpp_safe_name());
+        body();
+        rop.decrement_indent();
+        rop.outputfmtln("}}");
+        rop.close_jump_scope();
+    } else {  // dowhile
+        rop.open_jump_scope(JumpScope::Loop);
+        rop.outputfmtln("do {{");
+        rop.increment_indent();
+        body();
+        rop.build_cpp_code(op.jump(2), op.jump(3), false);
+        rop.build_cpp_code(op.jump(0), op.jump(1), false);
+        rop.decrement_indent();
+        rop.outputfmtln("}} while ({});", cond.cpp_safe_name());
+        rop.close_jump_scope();
+    }
+    rop.pop_loop_context();
+    return true;
+}
+
+
+
 bool
 cpp_gen_loop_op(BackendCpp& rop, int opnum)
 {
@@ -4135,6 +4288,9 @@ cpp_gen_loop_op(BackendCpp& rop, int opnum)
     std::string step_lbl;
     if (need_step_label)
         step_lbl = fmtformat("cpp_loop_step_{}", rop.new_loop_label_id());
+
+    if (!rop.lang_has_goto())
+        return cpp_gen_loop_op_structured(rop, opnum, need_step_label);
 
     // Push context: empty string = emit natural 'continue;' keyword.
     rop.push_loop_context(step_lbl);
@@ -4282,6 +4438,14 @@ std::string
 BackendCpp::cpp_string_literal_rep(string_view s) const
 {
     return fmtformat("OSL::ustring(\"{}\").hash()", quoted_string(s));
+}
+
+
+
+std::string
+BackendCpp::lang_string_const_decl() const
+{
+    return "static const uint64_t";
 }
 
 
@@ -4610,6 +4774,17 @@ cpp_gen_loopmod_op(BackendCpp& rop, int opnum)
 {
     Opcode& op(rop.inst()->ops()[opnum]);
     static ustring op_break("break");
+    if (!rop.lang_has_goto()) {
+        using JumpScope = BackendCpp::JumpScope;
+        if (op.opname() == op_break)
+            rop.jump_to(JumpScope::Loop);
+        else if (rop.loop_cont_target().empty()
+                 && rop.innermost_jump_scope_is(JumpScope::Loop))
+            rop.outputfmtln("continue;");
+        else
+            rop.jump_to(JumpScope::Continue);
+        return true;
+    }
     if (op.opname() == op_break) {
         rop.outputfmtln("break;");
     } else {  // continue
@@ -4633,6 +4808,15 @@ cpp_gen_return(BackendCpp& rop, int opnum)
 {
     Opcode& op(rop.inst()->ops()[opnum]);
     static ustring s_exit("exit");
+    if (!rop.lang_has_goto()) {
+        using JumpScope = BackendCpp::JumpScope;
+        if (op.opname() != s_exit && rop.inside_function()
+            && !rop.func_return_target().empty())
+            rop.jump_to(JumpScope::Function);
+        else
+            rop.jump_to(JumpScope::Layer);
+        return true;
+    }
     // A function-scope `return` jumps to that function's return label.
     if (op.opname() != s_exit && rop.inside_function()
         && !rop.func_return_target().empty()) {
@@ -4907,7 +5091,7 @@ BackendCpp::op_gen_init()
     OP (calculatenormal, calculatenormal);
     OP (cbrt,        generic);
     OP (ceil,        generic);
-    OP (cellnoise,   generic /*noise*/);
+    OP (cellnoise,   noise);
     OP (clamp,       generic);
     OP (closure,     closure);
     OP (color,       construct_color);
@@ -4959,7 +5143,7 @@ BackendCpp::op_gen_init()
     OP (gettextureinfo, gettextureinfo);
     OP (gt,          compare_op);
     OP (hash,        generic);
-    OP (hashnoise,   generic /*noise*/);
+    OP (hashnoise,   noise);
     OP (if,          if);
     OP (inversesqrt, generic);
     OP (isconnected, generic);

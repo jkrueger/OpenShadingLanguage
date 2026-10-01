@@ -695,6 +695,7 @@ public:
     bool dump_uniform_symbols() const { return m_dump_uniform_symbols; }
     bool dump_varying_symbols() const { return m_dump_varying_symbols; }
     int debug_output_cpp() const { return m_debug_output_cpp; }
+    int debug_output_metal() const { return m_debug_output_metal; }
     const std::string& cpp_output_dir() const { return m_cpp_output_dir; }
     const std::string& cpp_compiler() const { return m_cpp_compiler; }
     const std::string& cpp_compiler_flags() const
@@ -994,6 +995,8 @@ private:
     bool m_dump_varying_symbols;  ///< Output symbols BatchedAnalsysis determined are varying
     // Experimental output of cpp equivalent (0=off, 1=write, 2=compile, 3=execute)
     int m_debug_output_cpp = 0;
+    // Experimental output of msl equivalent (0=off, 1=write)
+    int m_debug_output_metal = 0;
     std::string m_cpp_output_dir;  // Directory for generated .cpp and .so files
     std::string m_cpp_compiler;    // C++ compiler for DSO compilation
     std::string m_cpp_compiler_flags;  // Flags for DSO compilation

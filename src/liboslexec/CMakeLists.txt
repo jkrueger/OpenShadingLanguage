@@ -124,6 +124,7 @@ set (lib_src
           opclosure.cpp
           shadeimage.cpp
           backendcpp.cpp
+          backendmetal.cpp
           backendllvm.cpp
           llvm_gen.cpp llvm_instance.cpp llvm_util.cpp
           rs_fallback.cpp

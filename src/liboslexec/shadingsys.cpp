@@ -13,6 +13,7 @@
 #include <OSL/fmt_util.h>
 #include <OSL/genclosure.h>
 #include "backendcpp.h"
+#include "backendmetal.h"
 #include "backendllvm.h"
 #if OSL_USE_BATCHED
 #    include "batched_backendllvm.h"
@@ -1681,6 +1682,7 @@ ShadingSystemImpl::attribute(string_view name, TypeDesc type, const void* val)
     ATTR_SET("dump_uniform_symbols", int, m_dump_uniform_symbols);
     ATTR_SET("dump_varying_symbols", int, m_dump_varying_symbols);
     ATTR_SET("debug_output_cpp", int, m_debug_output_cpp);
+    ATTR_SET("debug_output_metal", int, m_debug_output_metal);
     ATTR_SET_STRING("cpp_output_dir", m_cpp_output_dir);
     ATTR_SET_STRING("cpp_compiler", m_cpp_compiler);
     ATTR_SET_STRING("cpp_compiler_flags", m_cpp_compiler_flags);
@@ -1930,6 +1932,7 @@ ShadingSystemImpl::getattribute(string_view name, TypeDesc type, void* val)
     ATTR_DECODE("dump_uniform_symbols", int, m_dump_uniform_symbols);
     ATTR_DECODE("dump_varying_symbols", int, m_dump_varying_symbols);
     ATTR_DECODE("debug_output_cpp", int, m_debug_output_cpp);
+    ATTR_DECODE("debug_output_metal", int, m_debug_output_metal);
     ATTR_DECODE_STRING("cpp_output_dir", m_cpp_output_dir);
     ATTR_DECODE_STRING("cpp_compiler", m_cpp_compiler);
     ATTR_DECODE_STRING("cpp_compiler_flags", m_cpp_compiler_flags);
@@ -4046,6 +4049,23 @@ ShadingSystemImpl::optimize_group(ShaderGroup& group, ShadingContext* ctx,
                 cpper.load_dso(dso_path);
             }
         }
+    }
+
+    if (debug_output_metal() >= 1) {
+        BackendMetal metaller(*this, group, ctx);
+        metaller.run();
+        std::string outdir = cpp_output_dir().empty() ? "." : cpp_output_dir();
+        if (!OIIO::Filesystem::is_directory(outdir)) {
+            std::string errmsg;
+            if (!OIIO::Filesystem::create_directory(outdir, errmsg)) {
+                errorfmt("BackendMetal: could not create output directory {} ({})",
+                         outdir, errmsg);
+                return;
+            }
+        }
+        std::string filename = fmtformat("{}/group-metal-{}_{}.metal", outdir,
+                                         group.name(), group.id());
+        OIIO::Filesystem::write_text_file(filename, metaller.metal_source());
     }
 
     if (need_jit) {
