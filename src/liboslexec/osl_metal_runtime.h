@@ -41,6 +41,7 @@
 #include "osl_metal/errors.h"
 #include "osl_metal/generated/osl_cpp_inline.h"
 #include "osl_metal/generated/osl_opmatrix.h"
+#include "osl_metal/texture.h"
 
 #include "osl_metal/generated/osl_sfmath.h"
 #include "osl_metal/generated/osl_oslnoise.h"
