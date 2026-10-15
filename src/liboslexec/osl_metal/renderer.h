@@ -70,3 +70,14 @@ bool rs_get_texture_info_st(OSL::OpaqueExecContextPtr oec,
                             int subimage, OSL::ustringhash dataname,
                             OSL::TypeDesc datatype, thread void* data,
                             thread OSL::ustringhash* errormessage);
+
+
+// Answers getattribute(): writes the value of attribute `name`, of type
+// `type`, of the object `object` (empty for the one being shaded) to
+// `result`, and returns whether there is one. With `derivatives`, `result`
+// has room for the value's x and y derivatives after it, which the renderer
+// fills in too. `index` is the element an array lookup asks for, and 0
+// otherwise. The same as rs_get_attribute in rs_free_function.h.
+bool rs_get_attribute(OSL::OpaqueExecContextPtr oec, OSL::ustringhash object,
+                      OSL::ustringhash name, OSL::TypeDesc type,
+                      bool derivatives, int index, thread void* result);
