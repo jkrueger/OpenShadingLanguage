@@ -1025,6 +1025,18 @@ BackendCpp::generate_layer_func(int layer)
             };
 
             const bool singlechan = (srcchan != -1) || (dstchan != -1);
+            // Whole -> whole, both carrying derivatives of the same type: copy
+            // the Dual2 as a unit, so a Dx/Dy downstream sees the source's
+            // derivatives rather than zeros (the JIT copies the derivatives
+            // with the value).
+            if (!singlechan && sym_carries_derivs(*dstsym)
+                && sym_carries_derivs(*srcsym) && st.aggregate == agg
+                && st.basetype == dt.basetype
+                && srcsym->typespec().is_color()
+                       == dstsym->typespec().is_color()) {
+                outputfmtln("{} = {};", dstbase, srcsym->cpp_safe_name());
+                continue;
+            }
             if (!singlechan) {
                 // Whole -> whole. Matching aggregate (or scalar) copies as a
                 // unit; a scalar source into an aggregate dest broadcasts.
