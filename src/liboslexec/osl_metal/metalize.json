@@ -205,7 +205,7 @@
             "output": "osl_cpp_inline.h",
             "lines": [
                 634,
-                1071
+                1186
             ],
             "drop": [
                 "\\bosl_strto[if]_"

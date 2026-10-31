@@ -828,6 +828,121 @@ osl_max_dfdfdf(void* r_, void* a_, void* b_)
 
 
 
+// The mixed forms, with derivatives on only one side, which the generic call
+// names when the other side is a constant, or doesn't carry them: the side
+// without derivatives counts as one whose derivatives are zero.
+static inline void
+osl_min_dfdff(void* r_, void* a_, float b)
+{
+    OSL::Dual2<float>& a    = *(OSL::Dual2<float>*)a_;
+    *(OSL::Dual2<float>*)r_ = (a.val() <= b) ? a : OSL::Dual2<float>(b);
+}
+
+
+
+static inline void
+osl_min_dffdf(void* r_, float a, void* b_)
+{
+    OSL::Dual2<float>& b    = *(OSL::Dual2<float>*)b_;
+    *(OSL::Dual2<float>*)r_ = (a <= b.val()) ? OSL::Dual2<float>(a) : b;
+}
+
+
+
+static inline void
+osl_max_dfdff(void* r_, void* a_, float b)
+{
+    OSL::Dual2<float>& a    = *(OSL::Dual2<float>*)a_;
+    *(OSL::Dual2<float>*)r_ = (a.val() > b) ? a : OSL::Dual2<float>(b);
+}
+
+
+
+static inline void
+osl_max_dffdf(void* r_, float a, void* b_)
+{
+    OSL::Dual2<float>& b    = *(OSL::Dual2<float>*)b_;
+    *(OSL::Dual2<float>*)r_ = (a > b.val()) ? OSL::Dual2<float>(a) : b;
+}
+
+
+
+// Triples pick per component, as `osl_min_vvv` does, each with the
+// derivatives of the side it picked: `max` picks `a` where it is the larger,
+// and `min` where it is the smaller or the same, as the scalar forms do.
+static inline void
+osl_minmax_dvdvdv(void* r_, const OSL::Dual2<OSL::Vec3>& a,
+                  const OSL::Dual2<OSL::Vec3>& b, bool is_max)
+{
+    OSL::Dual2<OSL::Vec3> r = b;
+    for (int i = 0; i < 3; ++i) {
+        const bool pick_a = is_max ? (a.val()[i] > b.val()[i])
+                                   : (a.val()[i] <= b.val()[i]);
+        if (pick_a) {
+            r.val()[i] = a.val()[i];
+            r.dx()[i]  = a.dx()[i];
+            r.dy()[i]  = a.dy()[i];
+        }
+    }
+    *(OSL::Dual2<OSL::Vec3>*)r_ = r;
+}
+
+
+
+static inline void
+osl_min_dvdvdv(void* r_, void* a_, void* b_)
+{
+    osl_minmax_dvdvdv(r_, *(OSL::Dual2<OSL::Vec3>*)a_,
+                      *(OSL::Dual2<OSL::Vec3>*)b_, false);
+}
+
+
+
+static inline void
+osl_min_dvdvv(void* r_, void* a_, void* b_)
+{
+    osl_minmax_dvdvdv(r_, *(OSL::Dual2<OSL::Vec3>*)a_,
+                      OSL::Dual2<OSL::Vec3>(*(OSL::Vec3*)b_), false);
+}
+
+
+
+static inline void
+osl_min_dvvdv(void* r_, void* a_, void* b_)
+{
+    osl_minmax_dvdvdv(r_, OSL::Dual2<OSL::Vec3>(*(OSL::Vec3*)a_),
+                      *(OSL::Dual2<OSL::Vec3>*)b_, false);
+}
+
+
+
+static inline void
+osl_max_dvdvdv(void* r_, void* a_, void* b_)
+{
+    osl_minmax_dvdvdv(r_, *(OSL::Dual2<OSL::Vec3>*)a_,
+                      *(OSL::Dual2<OSL::Vec3>*)b_, true);
+}
+
+
+
+static inline void
+osl_max_dvdvv(void* r_, void* a_, void* b_)
+{
+    osl_minmax_dvdvdv(r_, *(OSL::Dual2<OSL::Vec3>*)a_,
+                      OSL::Dual2<OSL::Vec3>(*(OSL::Vec3*)b_), true);
+}
+
+
+
+static inline void
+osl_max_dvvdv(void* r_, void* a_, void* b_)
+{
+    osl_minmax_dvdvdv(r_, OSL::Dual2<OSL::Vec3>(*(OSL::Vec3*)a_),
+                      *(OSL::Dual2<OSL::Vec3>*)b_, true);
+}
+
+
+
 // clamp
 static inline float
 osl_clamp_ffff(float x, float lo, float hi)
